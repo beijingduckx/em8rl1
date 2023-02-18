@@ -361,3 +361,28 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+#
+imgui/*
+include/*
+lib/*
+/firmware/em8rl1.mem
+/firmware/em8rl1.rel
+/firmware/em8rl1.rst
+/firmware/em8rl1.sym
+/firmware/gpif.asm
+/firmware/gpif.lst
+/firmware/gpif.rel
+/firmware/gpif.rst
+/firmware/gpif.sym
+/firmware/highInt.gpf
+/firmware/memo.txt
+/firmware/rm8rl1.lk
+/firmware/dataSelector2.gpf
+/firmware/em8rl1.asm
+/firmware/em8rl1.ihx
+/firmware/em8rl1.inc
+/firmware/em8rl1.lk
+/firmware/em8rl1.lst
+/firmware/em8rl1.map
+/imgui.ini
