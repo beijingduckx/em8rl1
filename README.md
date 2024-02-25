@@ -10,12 +10,21 @@ X1 turboなどの背面 CMT 端子に接続して、CZ-8RL1の代わりに使い
 1. 10kΩ抵抗 2本、配線、EZ-USB Development board と PCとを接続する USBケーブルなど
 
 # 起動
-1. EZ-USBが、WinUSBドライバで認識されるようにWindowsを設定します
-1. 回路図にしたがって、DINプラグと抵抗とEZ-USBとを接続します  (注: RDY1とRDY0が逆に印刷されているボードがあります)
+1. EZ-USBが、WinUSBドライバで認識されるようにWindowsを設定します  
+   Zadigを利用して設定します
+   ([設定例](https://github.com/beijingduckx/em8rl1/issues/1#issuecomment-1655435826))
+1. 回路図にしたがって、DINプラグと抵抗とEZ-USBとを接続します  
+(注: RDY1とRDY0が逆に印刷されているボードがあります  
+正常に動作しないときは、ここをチェックしてみてください)
 2. X1 背面の CMT 端子に DINプラグを接続します。
 3. EZ-USBのUSB端子とPCとを接続します
 5. `em8RL1.exe`を実行します
 1. X1 の電源を投入します
+
+* EZ-USBのファームウェアは、`em8RL1.exe`に含まれています  
+ `em8RL1.exe`の起動時に自動的にEZ-USBにダウンロードします  
+ EZ-USBにあらかじめプログラムをダウンロードする必要はありません
+ 
 
 # 使い方
 - `File -> Set Tape..`で、カセットテープイメージ (*.tapファイル) を選択します
@@ -87,6 +96,8 @@ EZ-USBは 44.1kHz きっかりを生成できないので、2種類の周波数�
 
 
 # プログラムについて
-- `firmware`フォルダのプログラムは、SDCCをインストールしPATHが通ったPowerSehll環境で`./compile.ps1`とすればコンパイルできます
+- `firmware`フォルダのプログラム(EZ-USB用)は、SDCCをインストールしPATHが通ったPowerSehll環境で`./compile.ps1`とすればコンパイルできます  
+ここで生成されたプログラムは、Windows側のプログラムにインクルードされます
+(EZ-USBのEEPROMに書き込む必要はありません)
 - Windows側のプログラムのコンパイルは、VisualStudio 2022, SDL2開発ライブラリ、libusb、ImGui (https://github.com/ocornut/imgui) が必要です  
  (SDL2ライブラリは、プロジェクトディレクトリ内にincludeディレクトリ、libディレクトリを作成してその中に入れます)
