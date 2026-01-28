@@ -2,7 +2,7 @@
 // firmware for Cypress EZ-USB FX2LP
 //  CZ-8RL1 emulator
 //
-#include "Fx2.h"
+#include "fx2.h"
 #include "fx2regs.h"
 #include "syncdly.h"
 #include <stdint.h>
@@ -126,17 +126,58 @@ void initialize()
     // bit3   1=1024bytes buffer(EP2,6 only), 0=512bytes
     // bit2   -
     // bit1:0 00=Quad, 01=Invalid, 10=Double, 11=Triple
+    EP1OUTCS = 0;
+    SYNCDELAY;
     EP1OUTCFG = 0xa0; // 0b1010_0000  // Valid, Bulk-OUT
+    SYNCDELAY;
+    EP1INCS = 0;
     SYNCDELAY;
     EP1INCFG = 0xa0; // Valid, Bulk-IN
     SYNCDELAY;
     EP2CFG &= 0x7f; // disable
     SYNCDELAY;
+    EP4CS = 0;
+    SYNCDELAY;
     EP4CFG &= 0xa2; // Bulk-OUT, 512 byte, Double buffer
+    SYNCDELAY;
+    EP6CS = 0;
     SYNCDELAY;
     EP6CFG = 0xe2; // 0b1110_0010; Bulk-IN, 512bytes Double buffer
     SYNCDELAY;
+    EP8CS = 0;
+    SYNCDELAY;
     EP8CFG &= 0x7f; // Bluk-OUT, 512bytes, Double buffer
+    SYNCDELAY;
+
+    FIFORESET = 0x80;
+    SYNCDELAY;
+    FIFORESET = 0x84;
+    SYNCDELAY;
+    FIFORESET = 0x86;
+    SYNCDELAY;
+    FIFORESET = 0x88;
+    SYNCDELAY;
+    FIFORESET = 0x00;
+    SYNCDELAY;
+
+    OUTPKTEND = 0x84;
+    SYNCDELAY;
+    OUTPKTEND = 0x00;
+    SYNCDELAY;
+
+    TOGCTL = 0x11;
+    SYNCDELAY;
+    TOGCTL = 0x31;
+    SYNCDELAY;
+
+    TOGCTL = 0x14;
+    SYNCDELAY;
+    TOGCTL = 0x34;
+    SYNCDELAY;
+
+    TOGCTL = 0x16;
+    SYNCDELAY;
+    TOGCTL = 0x36;
     SYNCDELAY;
 
     // ----------------------------------------------------------------------
@@ -564,7 +605,7 @@ void command_low_int(void) __interrupt(2)
         {
             feed_command_bit(0);
         }
-        command_state - COM_STATE_IN_BITS;
+        // command_state = COM_STATE_IN_BITS;
     }
 }
 

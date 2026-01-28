@@ -1,30 +1,39 @@
 # CZ-8RL1 Emulator
 
-通販サイトなどで売られているEZ-USB FX2LP Development board と Windows PCを使って、実機のCZ-8RL1をエミュレートします   
+通販サイトなどで売られているEZ-USB FX2LP Development board と Windows PC もしくは Raspberry Pi を使って、実機のCZ-8RL1をエミュレートします   
 X1 turboなどの背面 CMT 端子に接続して、CZ-8RL1の代わりに使います
 
 # 材料
-1. Windows PC (64bit)
+1. Windows PC (64bit) もしくは Raspberry Pi *1
 1. EZ-USB FX2LP Development board  ([例](https://www.amazon.co.jp/ez-usb/s?k=ez-usb))
-1. 7pin DINコネクタ  ([CMTケーブルがある場合の例](https://www.marutsu.co.jp/pc/i/19050/))
+1. 7pin DINコネクタ  ([CMTケーブルがある場合の例](https://www.marutsu.co.jp/pc/i/19050/) : 廃版になったようです  [こちらで代用できるかもしれませんが未確認です](https://www.marutsu.co.jp/pc/i/19053/))
 1. 10kΩ抵抗 2本、配線、EZ-USB Development board と PCとを接続する USBケーブルなど
 
+*1: Raspberry Piは、3Bでテストしています (ZeroはX1でロードエラーが発生することがあり、非推奨です)
+
 # 起動
-1. EZ-USBが、WinUSBドライバで認識されるようにWindowsを設定します  
+1. (Windowsのみ) EZ-USBが、WinUSBドライバで認識されるようにWindowsを設定します  
    Zadigを利用して設定します
    ([設定例](https://github.com/beijingduckx/em8rl1/issues/1#issuecomment-1655435826))
 1. 回路図にしたがって、DINプラグと抵抗とEZ-USBとを接続します  
-(注: RDY1とRDY0が逆に印刷されているボードがあります  
+(注: RDY1とRDY0のシルクが逆に印刷されているボードがあります  
 正常に動作しないときは、ここをチェックしてみてください)
 2. X1 背面の CMT 端子に DINプラグを接続します。
-3. EZ-USBのUSB端子とPCとを接続します
-5. `em8RL1.exe`を実行します
+3. EZ-USBのUSB端子とPC/Raspberry Piとを接続します
+5. `em8RL1.exe`を実行します  (Raspberry Piの場合は `sudo em8rl1`)
 1. X1 の電源を投入します
 
 * EZ-USBのファームウェアは、`em8RL1.exe`に含まれています  
  `em8RL1.exe`の起動時に自動的にEZ-USBにダウンロードします  
  EZ-USBにあらかじめプログラムをダウンロードする必要はありません
- 
+
+
+* Raspberry Pi版は、コンソールでも X Window System でも動作します  
+X Window Systemの場合はできる限り軽量なデスクトップ環境を利用してください。
+
+* Raspberry Piは、idVendor: 04b4, idProduct: 8613に対してudev ruleを設定することで、`em8rl1`を一般ユーザ権限で起動することもできます
+
+
 
 # 使い方
 - `File -> Set Tape..`で、カセットテープイメージ (*.tapファイル) を選択します
@@ -32,8 +41,7 @@ X1 turboなどの背面 CMT 端子に接続して、CZ-8RL1の代わりに使い
 - カセットテープイメージがセットされている場合は、早送りや巻き戻しなどのボタンが表示され、操作が可能です
 
 # 設定について
-通常は設定を変更する必要はないと思いますが、ロードやセーブがうまくいかないときに
-設定を変更してみてください
+通常は設定を変更する必要はないと思いますが、ロードやセーブがうまくいかないときに設定を変更してみてください
 
 - `Settings -> Alt. 44kHz frequency`   
 EZ-USBは 44.1kHz きっかりを生成できないので、2種類の周波数を設定できるようにしています  
@@ -45,13 +53,17 @@ EZ-USBは 44.1kHz きっかりを生成できないので、2種類の周波数�
 もともとは、サンプリング周波数が低いテープイメージにもセーブ可能とするための機能です  
 サンプリング周波数が32kHz未満のテープイメージにセーブする場合は、設定に関わらずこのビット変換が有効になります   
 この設定が無効の場合は、X1から出力された波形をサンプルしたビット値をテープイメージに書き込みます (サンプリング周波数が32kHz以上のテープイメージのみ)
+- `Settings -> Write protect`  
+現在のテープのライトプロテクト状態を表示します  
+新形式のテープフォーマットの場合、このメニューで書き込み禁止、書き込み許可を切り替えることができます
 
 # セーブについて
 - セーブする場合は、データの破損を防ぐため、事前にテープイメージのバックアップをとっておいてください  
-  (不具合により正しくセーブされなかったり、テープイメージを破損する可能性があります)
+  (プログラムの不具合やOSの処理が滞ったことにより正しくセーブされなかったり、テープイメージを破損する可能性があります)
   
 - Bit conversion機能を有効にした場合  
-ゲームによっては正しくセーブできないことがあります 手元のソフトでは、トリトーンは正しくセーブできませんでした  
+ゲームによっては正しくセーブできないことがあります  
+手元のソフトでは、トリトーンは正しくセーブできませんでした  
 なお、APSS用のブランク書き込み中はカウンタが進みません (良い解決策が思いつかず)
 
 - Bit conversion 機能を無効にした場合  
@@ -69,7 +81,7 @@ EZ-USBは 44.1kHz きっかりを生成できないので、2種類の周波数�
   その他8kHzの整数倍であれば正常に読み取り・書き込みできると思いますが、動作確認していません
 - 旧型式の場合、イメージファイルに読み取り専用属性を付与することで、テープの消去防止爪を折った(書き込み禁止)状態とすることができます  
   新形式でも、この方法で消去防止爪を折った状態を作ることができますが、テープの状態保存はされません
-- 旧型式を新形式に変換したり、新形式での消去防止爪のフラグを設定する機能は持っていません (エミュレータ等をご利用ください)
+- 旧型式を新形式に変換する機能は持っていません (エミュレータ等をご利用ください)
 
 
 # 動作について
@@ -82,11 +94,13 @@ EZ-USBは 44.1kHz きっかりを生成できないので、2種類の周波数�
 - EZ-USBがハングすると、X1のサブCPUの動作が不正となることがあります (キーボードが効かなくなる・IPLリセットを押しても、`Please trun on the power SW slowly again`の表示となる など)  
   この場合、EZ-USBをリセットし、`em8RL1.exe`を立ち上げ直すことで解消されることがありますが、ダメな時はX1の背面のスイッチを一旦OFFにしてください
 - 'USB Error'のダイアログが表示されることがあります この場合も、EZ-USBをリセットし、`em8RL1.exe`を立ち上げ直してください
-
+- リモートデスクトップ環境での利用を想定し、UIの更新フレームレートを下げています
 
 # テスト環境
 - X1 turboII
-- Windows11 22H2
+- Windows11 25H2
+- Raspberry 3B (Linux raspberrypi 6.12.47+rpt-rpi-v7 #1 SMP Raspbian 1:6.12.47-1+rpt1~bookworm (2025-09-16) armv7l GNU/Linux)
+
 
 
 # 非保証
@@ -96,8 +110,32 @@ EZ-USBは 44.1kHz きっかりを生成できないので、2種類の周波数�
 
 
 # プログラムについて
+
+## Windowsでのビルド
 - `firmware`フォルダのプログラム(EZ-USB用)は、SDCCをインストールしPATHが通ったPowerSehll環境で`./compile.ps1`とすればコンパイルできます  
 ここで生成されたプログラムは、Windows側のプログラムにインクルードされます
 (EZ-USBのEEPROMに書き込む必要はありません)
 - Windows側のプログラムのコンパイルは、VisualStudio 2022, SDL2開発ライブラリ、libusb、ImGui (https://github.com/ocornut/imgui) が必要です  
- (SDL2ライブラリは、プロジェクトディレクトリ内にincludeディレクトリ、libディレクトリを作成してその中に入れます)
+ (libusb, SDL2ライブラリは、プロジェクトディレクトリ内に`include`ディレクトリ、`lib`ディレクトリを作成してその中に入れます)
+
+## Raspberry Piでのビルド
+1. sdcc, libusb-1.0, SDL2 およびビルドに必要なツールをインストールします
+``` sh
+sudo apt build-essential git sdcc libusb-1.0-0-dev libsdl2-dev
+```
+2. 必要なコードをクローンし、ビルドします
+``` sh
+git clone https://github.com/beijingduckx/em8rl1.git
+cd em8r1l
+git submodule init
+git submodule update
+make
+```
+
+これで、カレントディレクトリに`em8rl1`が生成されます
+
+
+
+# 参考資料
+- [RPi DigitalRGB Monitor](https://github.com/MinatsuT/RPi_DigitalRGB_Monitor) : EZ-USBへのファームウェアダウンロードのコードを参照させていただいています
+- [X Millennium t-tune](http://www.x1center.org/emu/xmil026_tt143s.ZIP) : TAPファイルのヘッダ部の構造体宣言を参照させていただいています

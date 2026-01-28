@@ -2,13 +2,16 @@
 
 #include <stdio.h>
 #include <libusb.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <io.h>
+
+#include <fstream>
+#include <filesystem>
 #include <queue>
 #include <mutex>
 #include <condition_variable>
 #include <thread>
+#include <chrono>
+
+#define sleep_mils(x)   (std::this_thread::sleep_for(std::chrono::milliseconds(x)))
 
 class BitStream {
 public:
@@ -162,16 +165,22 @@ protected:
 
 class FileBitStream : public BitStream {
 public:
-	void set_byte_stream(int file_handle, int header_offset) {
+	FileBitStream(void) {
+		m_file = nullptr;
+		m_header_offset = 0;
+	}
+
+	void set_byte_stream(std::iostream *file_handle, int header_offset) {
 		m_file = file_handle;
 		m_bit_offset = 0;
 		m_byte_offset = 0;
 		m_mask = 0x80;
 		m_header_offset = header_offset;
 
-		struct _stat stat_data;
-		_fstat(m_file, &stat_data);
-		m_byte_length = stat_data.st_size;
+		auto current_pos = m_file->tellg();
+		m_file->seekg(0, std::iostream::end);
+		auto length = m_file->tellg();
+		m_byte_length = length;
 
 		update_current_byte();
 	}
@@ -180,16 +189,17 @@ protected:
 	void update_current_byte(void)
 	{
 		m_dirty = false;
-		_lseek(m_file, m_byte_offset + m_header_offset, SEEK_SET);
-		_read(m_file, &m_current_byte, 1);
+		m_file->seekg(m_byte_offset + m_header_offset, std::ios::beg);
+		m_file->read(reinterpret_cast<char*>(&m_current_byte), 1);
 	}
 
 	void write_current_byte(void) {
-		_write(m_file, &m_current_byte, 1);
+		m_file->seekg(m_byte_offset + m_header_offset, std::ios::beg);
+		m_file->write(reinterpret_cast<const char*>(&m_current_byte), 1);
 		m_dirty = false;
 	}
 
-	int m_file;
+	std::iostream *m_file;
 	int m_header_offset;
 };
 
@@ -200,7 +210,7 @@ public:
 		m_usb_sample_rate = EZUSB_SAMPLE_RATE;
 		m_usb_time = 0;
 		m_continue = false;
-		m_file = 0;
+		m_file = nullptr;
 
 		m_apss_bit = 0;
 		m_apss_bit_change_detected = false;
@@ -218,58 +228,60 @@ public:
 
 		m_rec_bit_conversion = false;
 		m_tape_end = false;
+		memset(&m_header, 0, sizeof(m_header));
 	}
 
 	~TapFile() {
-		if (m_file != 0) {
-			_close(m_file);
+		if (m_file != nullptr) {
+			delete(m_file);
 		}
 	}
 
-	bool open(wchar_t* filename) {
+	bool open(const std::filesystem::path &filename) {
 		// close if opened
 		close();
 
 		// check read-only
-		struct _stat stat_data;
-		int oflag = _O_BINARY;
-		int ret = _wstat(filename, &stat_data);
-		if (ret < 0) {
+		auto mode = std::ios::in;
+		if (!std::filesystem::exists(filename)) {
 			return false;
 		}
-		if (stat_data.st_mode & S_IWRITE) {
+
+		auto stat = std::filesystem::status(filename);
+
+		if ((stat.permissions() & std::filesystem::perms::owner_write) != std::filesystem::perms::none) {
 			m_file_readonly = false;
-			oflag |= _O_RDWR;
+			mode |= std::ios::out;
 		}
 		else {
 			m_file_readonly = true;
-			oflag |= _O_RDONLY;
 		}
 
 		// 
-		m_file = _wopen(filename, oflag);
-		if (m_file < 0) {
-			m_file = 0;
+		m_file = new std::fstream(filename, mode | std::ios::binary);
+		if (!(*m_file)) {
+			m_file = nullptr;
 			return false;
 		}
 
 		// read header
-		ret = _read(m_file, &m_header, sizeof(m_header));
-		if (ret < 0) {
+		m_file->read(reinterpret_cast<char*>(&m_header), sizeof(m_header));
+		if (!(*m_file)) {
 			close();
 			return false;
 		}
 
 		// check if new format
+		auto filesize = std::filesystem::file_size(filename);
 		if (m_header.index == TAPE_INDEX) {
 			// new format
-			m_header.datasize = (stat_data.st_size - sizeof(m_header)) * 8;
+			m_header.datasize = (filesize - sizeof(m_header)) * 8;
 			m_old_format = false;
 		}
 		else {
 			// old format
 			m_header.frequency = m_header.index;
-			m_header.datasize = (stat_data.st_size - sizeof(m_header.index)) * 8;
+			m_header.datasize = (filesize - sizeof(m_header.index)) * 8;
 			m_header.position = sizeof(m_header.index) * 8;
 			m_header.protect = (m_file_readonly == true) ? TAPE_PROTECT : 0;
 			m_old_format = true;
@@ -300,21 +312,21 @@ public:
 		return true;
 	}
 
-	void close() {
+	void close(void) {
 		if (is_opened()) {
 			if (m_old_format == false && m_file_readonly == false) {
 				m_header.position = m_tape_data.get_bit_pos();
-				_lseek(m_file, 0, 0);
-				_write(m_file, &m_header, sizeof(m_header));
+				m_file->seekg(0, std::ios::beg);
+				m_file->write(reinterpret_cast<const char*>(&m_header), sizeof(m_header));
 			}
-			_close(m_file);
+			delete(m_file);
 		}
-		m_file = 0;
+		m_file = nullptr;
 	}
 
 	uint32_t get_bit_pos(void)
 	{
-		if (m_file != 0) {
+		if (m_file != nullptr) {
 			return m_tape_data.get_bit_pos();
 		}
 		return 0;
@@ -518,6 +530,10 @@ public:
 		return 0;
 	}
 
+	void to_top(void) {
+		m_tape_data.set_bit_pos(0);
+	}
+
 	bool is_write_protected(void)
 	{
 		if (m_header.protect != 0 || m_file_readonly == true) {
@@ -531,6 +547,18 @@ public:
 	void set_rec_bit_conversion(bool use_bit_conversion)
 	{
 		m_rec_bit_conversion = use_bit_conversion;
+	}
+
+	bool is_opened(void)
+	{
+		return (m_file != nullptr);
+	}
+
+	void try_set_write_protect(bool proted) {
+		if (!is_opened() || m_old_format || m_file_readonly) {
+			return;
+		}
+		m_header.protect = (proted == true) ? TAPE_PROTECT : 0;
 	}
 
 private:
@@ -615,7 +643,7 @@ private:
 		}
 	}
 
-	DWORD write_usb_data_to_tape_thread(void)
+	uint32_t write_usb_data_to_tape_thread(void)
 	{
 		uint8_t bit;
 		int duration_125us = 8000;
@@ -721,11 +749,6 @@ private:
 		}
 	}
 
-	bool is_opened(void)
-	{
-		return (m_file != 0);
-	}
-
 private:
 	// From xmil026_tt143s.zip 
 	typedef struct X1TapeHeaderRecoard
@@ -769,7 +792,7 @@ private:
 	BitStream m_usb_data;
 	FileBitStream m_tape_data;
 
-	int m_file;
+	std::iostream *m_file;
 	X1TAPE_HEADER m_header;
 	bool m_file_readonly;
 	bool m_old_format;
@@ -780,6 +803,34 @@ private:
 	std::thread m_write_tape_thread;
 	std::mutex m_write_lock;
 	std::condition_variable m_write_cond;
+};
+
+template <typename T>
+class InterThreadQueue {
+public:
+	void push(const T& value) {
+		std::lock_guard<std::mutex> lock(mtx_);
+		queue_.push(value);
+		cv_.notify_one();
+	}
+
+	T pop() {
+		std::unique_lock<std::mutex> lock(mtx_);
+		cv_.wait(lock, [this] { return !queue_.empty(); });
+		T value = queue_.front();
+		queue_.pop();
+		return value;
+	}
+
+	bool empty() const {
+		std::lock_guard<std::mutex> lock(mtx_);
+		return queue_.empty();
+	}
+
+private:
+	mutable std::mutex mtx_;
+	std::queue<T> queue_;
+	std::condition_variable cv_;
 };
 
 
@@ -804,7 +855,7 @@ public:
 		m_use_alt_44k = false;
 
 		m_command_receive_run_flag = true;
-		m_command_sender_run_flag = true;
+		m_command_receive_transfer = nullptr;
 		m_usb_error = false;
 	}
 
@@ -816,6 +867,7 @@ public:
 		COM_REW = 0x04,
 		COM_AFF = 0x05,
 		COM_AREW = 0x06,
+		COM_TAPETOP = 0x07,
 		COM_REC = 0x0a,
 		COM_STATUS = 0x80,
 		COM_SENSOR = 0x81,
@@ -850,22 +902,21 @@ public:
 	void power_on(void)
 	{
 		start_command_receive_thread();
-		start_command_sender_thread();
+		start_send_response_thread();
 	}
 
 	void power_off(void)
 	{
 		eject_tape();
-		::Sleep(500);  // wait for stop_tape() process
+		sleep_mils(500);   // wait for stop_tape() process
 		m_command_receive_run_flag = false;
 		if (m_usb_error == false) {
 			libusb_cancel_transfer(m_command_receive_transfer);
 		}
 		m_command_receive_thread.join();
 
-		m_command_sender_run_flag = false;
-		m_command_cond.notify_one();
-		m_command_sender_thread.join();
+		send_response(PC_END_THREAD, 0);
+		m_send_response_thread.join();
 
 		if (m_usb_thread.joinable() == true) {
 			libusb_cancel_transfer(m_tape_transfer);
@@ -873,11 +924,10 @@ public:
 			m_usb_thread.join();
 			libusb_free_transfer(m_tape_transfer);
 		}
-
 	}
 
-	bool set_tape(wchar_t* file_name) {
-		if (m_tape.open(file_name) == false) {
+	bool set_tape(const std::filesystem::path &filepath) {
+		if (m_tape.open(filepath) == false) {
 			return false;
 		}
 		m_sensor_state = TAPE_SET | ((m_tape.is_write_protected() == true) ? 0 : TAPE_NOT_WRITE_PROTECT);
@@ -889,9 +939,9 @@ public:
 	}
 
 	void eject_tape(bool is_internal = false) {
-		m_tape.close();
 		m_sensor_state = 0;
-		send_sensor();
+		stop_tape(true);
+		m_tape.close();
 		if (is_internal == true) {
 			m_event_callback(EVENT_TAPE_EJECT);
 		}
@@ -941,20 +991,74 @@ public:
 		return m_tape_run_flag;
 	}
 
+	bool get_tape_write_protected(void) {
+		if (m_tape.is_opened()) {
+			return m_tape.is_write_protected();
+		}
+		else {
+			return false;
+		}
+	}
+
+	void try_set_tape_write_protect(bool proted) {
+		if (m_tape_run_flag) {
+			return;
+		}
+
+		if (m_tape.is_opened()) {
+			m_tape.try_set_write_protect(proted);
+			m_sensor_state = TAPE_SET | ((m_tape.is_write_protected() == true) ? 0 : TAPE_NOT_WRITE_PROTECT);
+			send_sensor();
+		}
+	}
+
 	void command(uint8_t command) {
 		process_command(command);
+#if 0
 		// ignore return value
 
 		if (command == COM_STOP) {
 			send_response(PC_REQUEST, COM_STOP);
 		}
+#endif
 	}
 
 private:
+	enum pc_response_t {
+		PC_SENSOR_CHANGE,
+		PC_STATUS_CHANGE,
+		PC_REQUEST,
+		PC_TAPE_SAMPLE_RATE_CHANGE,
+		PC_END_THREAD,
+	};
+
+	enum tape_sample_rate_t {
+		TAPE_SAMPLE_48K = 0,
+		TAPE_SAMPLE_44K = 1,
+		TAPE_SAMPLE_44K_ALT = 2,
+		TAPE_SAMPLE_32K = 3,
+	};
+
+	struct pc_response_data {
+		pc_response_t type;
+		uint8_t response;
+	};
+
+	struct send_response_thread_param_t {
+		DataRecorder* obj;
+		pc_response_t type;
+		uint8_t response;
+	};
+
+	struct usb_callback_user_data_t {
+		DataRecorder* recorder;
+		int completed;
+	};
+
 	void stop_tape(bool is_send_event = true)
 	{
 		if (m_tape_mode == TAPE_MODE_REC) {
-			::Sleep(500);// wait for EZ-USB to complete OUT process 
+			sleep_mils(500); // wait for EZ-USB to complete OUT process 
 			m_tape_run_flag = false;
 			m_tape.stop_write();
 			libusb_cancel_transfer(m_tape_transfer);
@@ -971,7 +1075,7 @@ private:
 		m_is_send_event = true;
 	}
 
-	bool process_command(uint8_t command) {
+	void process_command(uint8_t command) {
 		bool is_respond_immediately = true;
 		uint8_t new_sensor = m_sensor_state;
 		tape_mode_t new_mode = TAPE_MODE_NONE;
@@ -1021,14 +1125,25 @@ private:
 			break;
 		case COM_REC:
 //			::OutputDebugStringA("REC\n");
+			if (m_tape.is_write_protected()) {
+				new_mode = TAPE_MODE_STOP;
+				new_sensor &= ~TAPE_RUNNING;
+				stop_tape(false);
+				break;
+			}
 			new_sensor |= TAPE_RUNNING;
 			new_mode = TAPE_MODE_REC;
 			if (m_tape_mode != TAPE_MODE_REC) {
 				m_tape.start_write();
 			}
 			break;
+		case COM_TAPETOP:
+			m_tape.to_top();
+			new_mode = TAPE_MODE_STOP;
+			new_sensor &= ~TAPE_RUNNING;
+			stop_tape(false);
+			break;
 		default:
-//			::OutputDebugStringA("Unknown code..\n");
 			break;
 		}
 
@@ -1036,8 +1151,15 @@ private:
 			// To change the tape mode, stop thet tape first
 			stop_tape(false);
 		}
+
 		m_tape_mode = new_mode;
 		m_sensor_state = new_sensor;
+
+		send_sensor();
+		if (is_respond_immediately == true) {
+			send_response(PC_REQUEST, command);
+		}
+		m_event_callback(EVENT_UPDATE_SCREEN);
 
 		if (m_tape_run_flag == false && (new_sensor & TAPE_RUNNING) && (new_sensor & TAPE_SET)) {
 			m_tape_run_flag = true;
@@ -1047,27 +1169,22 @@ private:
 			}
 			std::thread usb_thread([this]() {this->run_tape_thread(); });
 			usb_thread.swap(m_usb_thread);
-			::OutputDebugStringA("Tape Running..");
 		}
-		send_sensor();
-		m_event_callback(EVENT_UPDATE_SCREEN);
-
-		return is_respond_immediately;
 	}
 
 	void run_tape_thread(void) {
 		uint8_t trans_data[512];
 		int actual_length = 0;
-		ULONGLONG prev_time = 0;
+		static int64_t prev_time = 0;
 		bool is_usb_task = false;
 		bool is_send_event = false;
+		usb_callback_user_data_t user_data;
 
 		if (m_usb_error) {
 			return;
 		}
 
 		while (m_tape_run_flag) {
-			usb_callback_user_data_t user_data;
 			user_data.completed = 0;
 			user_data.recorder = this;
 			is_usb_task = false;
@@ -1102,7 +1219,7 @@ private:
 					is_send_event = true;
 				}
 				else {
-					::Sleep(10);
+					sleep_mils(10);
 				}
 				break;
 
@@ -1112,7 +1229,7 @@ private:
 					is_send_event = true;
 				}
 				else {
-					::Sleep(10);
+					sleep_mils(10);
 				}
 				break;
 
@@ -1122,7 +1239,7 @@ private:
 					is_send_event = true;
 				}
 				else {
-					::Sleep(10);
+					sleep_mils(10);
 				}
 				break;
 
@@ -1132,7 +1249,7 @@ private:
 					is_send_event = true;
 				}
 				else {
-					::Sleep(10);
+					sleep_mils(10);
 				}
 				break;
 			}
@@ -1143,7 +1260,7 @@ private:
 					m_usb_error = true;
 					return;
 				}
-				while (!user_data.completed && m_tape_run_flag == true) {
+				while (!user_data.completed) {
 					if (libusb_handle_events_completed(NULL, &user_data.completed) < 0) {
 						if (user_data.completed == 2) {
 							m_usb_error = true;
@@ -1162,8 +1279,11 @@ private:
 				}
 			}
 
-			if ((GetTickCount64() - prev_time) > 90) {
-				prev_time = GetTickCount64();
+			auto now = std::chrono::steady_clock::now();
+			auto current = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+
+			if ((current - prev_time) > SCREEN_UPDATE_PER_MS) {
+				prev_time = current;
 				m_event_callback(EVENT_UPDATE_SCREEN);
 			}
 		}
@@ -1171,97 +1291,75 @@ private:
 		m_sensor_state &= ~(TAPE_RUNNING);
 		m_tape_mode = TAPE_MODE_STOP;
 		// simulate mechanical transition
-		::Sleep(500);
+		sleep_mils(500);
 
 		if (is_send_event == true) {
-//			::OutputDebugStringA("Stop event");
 			send_sensor();
 			send_response(PC_REQUEST, DataRecorder::COM_STOP);
 		}
 		m_event_callback(EVENT_UPDATE_SCREEN);
 	}
 
-	enum pc_response_t {
-		PC_SENSOR_CHANGE,
-		PC_STATUS_CHANGE,
-		PC_REQUEST,
-		PC_TAPE_SAMPLE_RATE_CHANGE,
-	};
+	void send_response(pc_response_t type, uint8_t response) {
+		pc_response_data data = {type, response};
 
-	enum tape_sample_rate_t {
-		TAPE_SAMPLE_48K = 0,
-		TAPE_SAMPLE_44K = 1,
-		TAPE_SAMPLE_44K_ALT = 2,
-		TAPE_SAMPLE_32K = 3,
-	};
-
-	struct pc_response_arg {
-		pc_response_t type;
-		uint8_t response;
-	};
-
-	struct send_response_thread_param_t {
-		DataRecorder* obj;
-		pc_response_t type;
-		uint8_t response;
-	};
-
-	struct usb_callback_user_data_t {
-		DataRecorder* recorder;
-		int completed;
-	};
-
-	void send_response_thread(pc_response_t type, uint8_t response)
-	{
-		struct libusb_transfer* response_transfer;
-
-		if (m_usb_error) {
-			return;
-		}
-
-		int actual_length = 0;
-		uint8_t tmp[2];
-		usb_callback_user_data_t user_data;
-
-		user_data.completed = 0;
-		user_data.recorder = this;
-
-		tmp[0] = type;
-		tmp[1] = response;
-
-//		char tmp_str[256];
-//		snprintf(tmp_str, sizeof(tmp_str), "Resp: Type:%d  Data:%d\n", type, response);
-//		::OutputDebugStringA(tmp_str);
-
-		response_transfer = libusb_alloc_transfer(0);
-		if (response_transfer == NULL) {
-			return;
-		}
-
-		libusb_fill_bulk_transfer(response_transfer, m_usb_handle, OUT_RESPONSE_EP, tmp,
-			2, m_usb_callback, &user_data, USB_TIMEOUT_MS);
-		int ret = libusb_submit_transfer(response_transfer);
-		if (ret < 0) {
-			libusb_free_transfer(response_transfer);
-			m_usb_error = true;
-			return;
-		}
-		while (!user_data.completed && m_command_receive_run_flag == true) {
-			if (libusb_handle_events_completed(NULL, &user_data.completed) < 0) {
-				if (user_data.completed == 2) {
-					m_usb_error == true;
-				}
-				return;
-			}
-		}
-		libusb_free_transfer(response_transfer);
+		m_response_queue.push(data);
 	}
 
-	void send_response(pc_response_t type, uint8_t response)
+	void start_send_response_thread(void)
 	{
-		std::thread send_response([this, type, response]() {this->send_response_thread(type, response); });
-		// in a rude way..
-		send_response.detach();
+		std::thread receive_thread([this]() {this->send_response_thread(); });
+		receive_thread.swap(m_send_response_thread);
+	}
+
+	void send_response_thread(void)
+	{
+		struct libusb_transfer* response_transfer;
+		usb_callback_user_data_t user_data;
+
+		while (1) {
+			if (m_usb_error) {
+				return;
+			}
+
+			int actual_length = 0;
+			uint8_t tmp[2];
+
+			user_data.completed = 0;
+			user_data.recorder = this;
+
+			pc_response_data data = m_response_queue.pop();
+
+			if (data.type == PC_END_THREAD) {
+				break;
+			}
+
+			tmp[0] = data.type;
+			tmp[1] = data.response;
+
+			response_transfer = libusb_alloc_transfer(0);
+			if (response_transfer == NULL) {
+				return;
+			}
+
+			libusb_fill_bulk_transfer(response_transfer, m_usb_handle, OUT_RESPONSE_EP, tmp,
+				2, m_usb_callback, &user_data, USB_TIMEOUT_MS);
+			int ret = libusb_submit_transfer(response_transfer);
+			if (ret < 0) {
+				libusb_free_transfer(response_transfer);
+				m_usb_error = true;
+				return;
+			}
+			while (!user_data.completed) {
+				if (libusb_handle_events_completed(NULL, &user_data.completed) < 0) {
+					if (user_data.completed == 2) {
+						m_usb_error = true;
+					}
+					return;
+				}
+			}
+			libusb_free_transfer(response_transfer);
+		}
 	}
 
 	void send_sensor(void)
@@ -1269,9 +1367,6 @@ private:
 		uint8_t sensor;
 
 		sensor = get_sensor();
-//		char tmp[256];
-//		snprintf(tmp, sizeof(tmp), "Sensor: %d\n", sensor);
-//		::OutputDebugStringA(tmp);
 		send_response(PC_SENSOR_CHANGE, 0x80 | sensor);
 	}
 
@@ -1284,12 +1379,10 @@ private:
 	void command_receive_thread(void) {
 		uint8_t trans_data[512];
 		int actual_length = 0;
-		ULONGLONG prev_time = 0;
 
 		m_command_receive_transfer = libusb_alloc_transfer(0);
 
 		if (m_command_receive_transfer == NULL) {
-			::OutputDebugStringA("command transfer allocation failed.\n");
 			return;
 		}
 
@@ -1322,49 +1415,9 @@ private:
 				libusb_free_transfer(m_command_receive_transfer);
 				return;
 			}
-//			char tmp[512];
-//			snprintf(tmp, sizeof(tmp), "Command received: %x (%d)\n", trans_data[0], m_command_receive_transfer->actual_length);
-//			::OutputDebugStringA(tmp);
-
-			{
-				std::lock_guard<std::mutex> lock(m_command_lock);
-
-				m_command_queue.push(trans_data[0]);
-			}
-			m_command_cond.notify_one();
+			process_command(trans_data[0]);
 		}
 		libusb_free_transfer(m_command_receive_transfer);
-	}
-
-	void start_command_sender_thread(void)
-	{
-		std::thread sender_thread([this]() {this->command_sender_thread(); });
-		sender_thread.swap(m_command_sender_thread);
-	}
-
-	void command_sender_thread(void)
-	{
-		while (m_command_sender_run_flag) {
-			{
-				uint8_t command;
-				std::unique_lock<std::mutex> a_lock(m_command_lock);
-				m_command_cond.wait(a_lock, [this] {return (m_command_queue.size() > 0 || m_command_sender_run_flag == false); });
-				// command lock is aquired here
-				while (m_command_queue.size() > 0) {
-					command = m_command_queue.front();
-					m_command_queue.pop();
-					a_lock.unlock();
-
-					bool is_respond_immediately;
-					is_respond_immediately = process_command(command);
-
-					if (is_respond_immediately == true) {
-						send_response(PC_REQUEST, command);
-					}
-					a_lock.lock();
-				}
-			}
-		}
 	}
 
 	void set_usb_sample_rate() {
@@ -1396,20 +1449,22 @@ private:
 		send_response(PC_TAPE_SAMPLE_RATE_CHANGE, (uint8_t)real_usb_sample_rate);
 	}
 
-	static void __stdcall usb_callback(struct libusb_transfer* xfr) {
+	static void usb_callback(struct libusb_transfer* xfr) {
 		static int recv_count = 0;
 		usb_callback_user_data_t* user_data = (usb_callback_user_data_t*)xfr->user_data;
-//		char temp[256];
+		//char temp[256];
 
 		switch (xfr->status) {
 		case LIBUSB_TRANSFER_COMPLETED:
 			break;
 		case LIBUSB_TRANSFER_ERROR:
+			//snprintf(temp, sizeof(temp), "USB: transfer %d error\n", xfr->endpoint);
+			//::OutputDebugStringA(temp);
 			user_data->recorder->m_event_callback(EVENT_USB_ERROR);
 			break;
 		case LIBUSB_TRANSFER_TIMED_OUT:
-//			snprintf(temp, sizeof(temp), "USB: transfer %d timed out\n", xfr->endpoint);
-//			::OutputDebugStringA(temp);
+			//snprintf(temp, sizeof(temp), "USB: transfer %d timed out\n", xfr->endpoint);
+			//::OutputDebugStringA(temp);
 			user_data->recorder->m_event_callback(EVENT_USB_ERROR);
 			break;
 		case LIBUSB_TRANSFER_OVERFLOW:
@@ -1433,14 +1488,15 @@ private:
 
 
 	static constexpr int READ_CHUNK_SIZE = 64;
-	static constexpr int  USB_TIMEOUT_MS = 2000;
+	static constexpr int USB_TIMEOUT_MS = 2000;
+	static constexpr int SCREEN_UPDATE_PER_MS = 90;
 
 	static constexpr uint8_t OUT_RESPONSE_EP = 0x01;
 	static constexpr uint8_t IN_COMMAND_EP = 0x81;
 	static constexpr uint8_t IN_TAPE_EP = 0x86;
 	static constexpr uint8_t OUT_TAPE_EP = 0x04;
 
-	void(__stdcall* m_usb_callback)(struct libusb_transfer* xfr);
+	void(* m_usb_callback)(struct libusb_transfer* xfr);
 	libusb_device_handle* m_usb_handle;
 	struct libusb_transfer* m_tape_transfer;
 	uint8_t m_sensor_state;
@@ -1453,14 +1509,15 @@ private:
 	struct libusb_transfer* m_command_receive_transfer;
 	std::thread m_command_receive_thread;
 
+	std::thread m_send_response_thread;
+
 	void(*m_event_callback)(uint8_t);
 	bool m_is_send_event;
 	bool m_use_alt_44k;
 
-	std::mutex m_command_lock;
-	std::queue<uint8_t> m_command_queue;
-	std::condition_variable m_command_cond;
-	bool m_command_sender_run_flag;
+	InterThreadQueue<pc_response_data> m_response_queue;
+	InterThreadQueue<uint8_t> m_command_queue;
+
 	std::thread m_command_sender_thread;
 	bool m_usb_error;
 };

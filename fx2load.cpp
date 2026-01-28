@@ -17,7 +17,7 @@ static uint8_t firmware_dat[FIRMWARE_MAX_SIZE_PER_LINE];
 int usb_write_ram(int addr, uint8_t* dat, int size, libusb_device_handle* usb_handle) {
 
 	for (int i = 0; i < size; i += USB_WRITE_RAM_MAX_SIZE) {
-		LONG len = (size - i > USB_WRITE_RAM_MAX_SIZE) ? USB_WRITE_RAM_MAX_SIZE : size - i;
+		uint32_t len = (size - i > USB_WRITE_RAM_MAX_SIZE) ? USB_WRITE_RAM_MAX_SIZE : size - i;
 		int ret = libusb_control_transfer(usb_handle, LIBUSB_REQUEST_TYPE_VENDOR, 0xa0, addr + i, 0, dat + i, (uint16_t)len, 1000);
 		if (ret < 0) {
 			fprintf(stderr, "USB: Write Ram at %04x (len %d) failed.\n", addr + i, len);
