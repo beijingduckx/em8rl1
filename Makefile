@@ -21,13 +21,13 @@ LIBS += $(shell pkg-config --libs sdl2)
 all: em8rl1
 
 $(BUILD_DIR)/em8RL1.o: Recorder.h
-$(BUILD_DIR)/fx2load.c: firmware/fx2firm.h
+$(BUILD_DIR)/fx2load.o: firmware/fx2firm.inc
 
 vpath %.cpp $(IMGUI_DIR)
 vpath %.cpp $(IMGUI_DIR)/backends
 vpath %.cpp $(IMGUI_FILE_DLG_DIR)
 
-firmware/fx2firm.h: firmware/em8rl1.c
+firmware/fx2firm.inc: firmware/em8rl1.c
 	(cd firmware && $(MAKE))
 
 $(BUILD_DIR):
